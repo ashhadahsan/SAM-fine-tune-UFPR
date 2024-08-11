@@ -1,6 +1,6 @@
 DATASET:
-  TRAIN_PATH: "./dataset/inbreast-mass/train"
-  TEST_PATH: "./dataset/inbreast-mass/test"
+  TRAIN_PATH: "./ufpr_dataset/training"
+  TEST_PATH: "./ufpr_dataset/testing"
   IMAGE_FORMAT: ".png"
 
 SAM:
