@@ -130,5 +130,5 @@ class UFPR_ALPR_Dataset:
         return {"image": images, "mask": masks}
 
 # Initialize and prepare the dataset
-dataset = UFPR_ALPR_Dataset(DATASET_PATH, "training")
+dataset = UFPR_ALPR_Dataset(DATASET_PATH, "testing")
 data = dataset.prepare_data()
