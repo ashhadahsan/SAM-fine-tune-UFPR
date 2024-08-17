@@ -4,12 +4,11 @@ from PIL import Image
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 import logging
+import argparse
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
-
-DATASET_PATH = "/tmp/ahsan/sqfs/storage_local/datasets/public/ufpr-alpr"
 
 class UFPR_ALPR_Dataset:
     def __init__(self, root, split="training"):
@@ -129,6 +128,14 @@ class UFPR_ALPR_Dataset:
         logger.info("Data preparation completed.")
         return {"image": images, "mask": masks}
 
-# Initialize and prepare the dataset
-dataset = UFPR_ALPR_Dataset(DATASET_PATH, "testing")
-data = dataset.prepare_data()
+if __name__ == "__main__":
+    # Argument parsing
+    parser = argparse.ArgumentParser(description="UFPR ALPR Dataset Processing")
+    parser.add_argument("--dataset_path", type=str, required=True, help="Path to the dataset root directory",default="/tmp/ahsan/sqfs/storage_local/datasets/public/ufpr-alpr")
+    parser.add_argument("--split", type=str, choices=["training", "testing"], default="training", help="Dataset split to process")
+    
+    args = parser.parse_args()
+
+    # Initialize and prepare the dataset
+    dataset = UFPR_ALPR_Dataset(root=args.dataset_path, split=args.split)
+    data = dataset.prepare_data()
