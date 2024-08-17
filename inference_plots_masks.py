@@ -1,7 +1,6 @@
 import torch
 import numpy as np 
-from src.segment_anything import build_sam_vit_b, SamPredictor, sam_model_registry
-from src.processor import Samprocessor
+from src.segment_anything import build_sam_vit_b, SamPredictor
 from src.lora import LoRA_sam
 from PIL import Image
 import matplotlib.pyplot as plt
@@ -9,20 +8,15 @@ import src.utils as utils
 from PIL import Image, ImageDraw
 import yaml
 import json
-from torchvision.transforms import ToTensor
-
+import os
+from tqdm import tqdm
+os.environ['CUDA_VISIBLE_DEVICES']='9'
 """
 This file is used to plots the predictions of a model (either baseline or LoRA) on the train or test set. Most of it is hard coded so I would like to explain some parameters to change 
 referencing by lines : 
 line 22: change the rank of lora; line 98: Do inference on train (inference_train=True) else on test; line 101 and 111 is_baseline arguments in fuction: True to use baseline False to use LoRA model. 
 """
-sam_checkpoint = "sam_vit_b_01ec64.pth"
-device = "cuda" if torch.cuda.is_available() else "cpu"
-sam = build_sam_vit_b(checkpoint=sam_checkpoint)
-rank = 64
-sam_lora = LoRA_sam(sam, rank)
-sam_lora.load_lora_parameters(f"./lora_weights/lora_rank{rank}.safetensors")
-model = sam_lora.sam
+
 
 
 def inference_model(sam_model, image_path, filename, mask_path=None, bbox=None, is_baseline=False):
@@ -91,7 +85,13 @@ with open("./config.yaml", "r") as ymlfile:
 # Open annotation file
 f = open('annotations.json')
 annotations = json.load(f)
-
+sam_checkpoint = "sam_vit_b_01ec64.pth"
+device = "cuda" if torch.cuda.is_available() else "cpu"
+sam = build_sam_vit_b(checkpoint=sam_checkpoint)
+rank = 512
+sam_lora = LoRA_sam(sam, rank)
+sam_lora.load_lora_parameters(f"./lora_weights/lora_rank{rank}.safetensors")
+model = sam_lora.sam
 
 train_set = annotations["train"]
 test_set = annotations["test"]
@@ -99,15 +99,20 @@ inference_train = True
 
 if inference_train:
 
-    for image_name, dict_annot in train_set.items():
-        image_path = f"./dataset/train/images/{image_name}"
-        inference_model(sam_lora, image_path, filename=image_name, mask_path=dict_annot["mask_path"], bbox=dict_annot["bbox"], is_baseline=False)
-
+    for image_name,value in tqdm(train_set.items()):
+        torch.cuda.empty_cache()
+        image_path = value.get("image_path")
+        mask_path=value.get("mask_path")
+        bbox=value.get("bbox")
+        inference_model(sam_lora, image_path, filename=image_name, mask_path=mask_path, bbox=bbox, is_baseline=False)
 
 else:
 
-    for image_name, dict_annot in test_set.items():
-        image_path = f"./dataset/test/images/{image_name}"
-        inference_model(sam_lora, image_path, filename=image_name, mask_path=dict_annot["mask_path"], bbox=dict_annot["bbox"], is_baseline=False)
-        
+    for image_name, value in test_set.items():
+        torch.cuda.empty_cache()
+        image_path = value.get("image_path")
+        mask_path = value.get("mask_path")
+        bbox = value.get("bbox")
+        inference_model(sam_lora, image_path, filename=image_name, mask_path=mask_path, bbox=bbox, is_baseline=False)
+
         
