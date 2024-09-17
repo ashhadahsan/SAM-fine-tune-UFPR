@@ -1,12 +1,3 @@
-# Adapted from dataset loader written by meetshah1995 with modifications
-# https://github.com/meetshah1995/pytorch-semseg/blob/master/ptsemseg/loader/cityscapes_loader.py
-ROOT_PATH="/tmp/ahsan/sqfs/storage_local/datasets/public/cityscapes/"
-path_data = ROOT_PATH
-learning_rate = 1e-6
-train_epochs = 8
-n_classes = 19
-batch_size = 1
-num_workers = 1
 import torch
 import os
 import numpy as np
@@ -14,6 +5,14 @@ from torch.utils import data
 from torch.utils.data import DataLoader
 import cv2
 import matplotlib.pyplot as plt
+from tqdm import tqdm
+from PIL import Image
+import logging
+import argparse
+
+# Setup logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 def recursive_glob(rootdir=".", suffix=""):
     return [
@@ -23,9 +22,8 @@ def recursive_glob(rootdir=".", suffix=""):
         if filename.endswith(suffix)
     ]
 
-
 class cityscapesLoader(data.Dataset):
-    colors = [  # [  0,   0,   0],
+    colors = [
         [128, 64, 128],
         [244, 35, 232],
         [70, 70, 70],
@@ -47,17 +45,14 @@ class cityscapesLoader(data.Dataset):
         [119, 11, 32],
     ]
 
-    # makes a dictionary with key:value. For example 0:[128, 64, 128]
+    # Map each class to its corresponding color
     label_colours = dict(zip(range(19), colors))
 
     def __init__(
         self,
         root,
-        # which data split to use
         split="train",
-        # transform function activation
         is_transform=True,
-        # image_size to use in transform function
         img_size=(512, 1024),
     ):
         self.root = root
@@ -67,20 +62,16 @@ class cityscapesLoader(data.Dataset):
         self.img_size = img_size if isinstance(img_size, tuple) else (img_size, img_size)
         self.files = {}
 
-        # makes it: /raid11/cityscapes/ + leftImg8bit + train (as we named the split folder this)
         self.images_base = os.path.join(self.root, "leftImg8bit", self.split)
         self.annotations_base = os.path.join(self.root, "gtFine", self.split)
         
-        # contains list of all pngs inside all different folders. Recursively iterates 
         self.files[split] = recursive_glob(rootdir=self.images_base, suffix=".png")
 
         self.void_classes = [0, 1, 2, 3, 4, 5, 6, 9, 10, 14, 15, 16, 18, 29, 30, -1]
-        
-        # these are 19
-        self.valid_classes = [7, 8, 11, 12, 13, 17, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 31, 32, 33,
+        self.valid_classes = [
+            7, 8, 11, 12, 13, 17, 19, 20, 21,
+            22, 23, 24, 25, 26, 27, 28, 31, 32, 33,
         ]
-        
-        # these are 19 + 1; "unlabelled" is extra
         self.class_names = [
             "unlabelled",
             "road",
@@ -103,41 +94,36 @@ class cityscapesLoader(data.Dataset):
             "motorcycle",
             "bicycle",
         ]
-        
-        # for void_classes; useful for loss function
         self.ignore_index = 250
-        
-        # dictionary of valid classes 7:0, 8:1, 11:2
         self.class_map = dict(zip(self.valid_classes, range(19)))
 
         if not self.files[split]:
             raise Exception("No files for split=[%s] found in %s" % (split, self.images_base))
         
-        # prints number of images found
         print("Found %d %s images" % (len(self.files[split]), split))
 
     def __len__(self):
         return len(self.files[self.split])
 
     def __getitem__(self, index):
-    # path of image
+        # Path of image
         img_path = self.files[self.split][index].rstrip()
 
-        # path of label
+        # Path of label
         lbl_path = os.path.join(
             self.annotations_base,
             img_path.split(os.sep)[-2],
             os.path.basename(img_path)[:-15] + "gtFine_labelIds.png",
         )
 
-        # read image using OpenCV
+        # Read image using OpenCV
         img = cv2.imread(img_path)
-        # convert BGR to RGB (as OpenCV loads images in BGR format)
+        # Convert BGR to RGB
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
-        # read label using OpenCV
+        # Read label using OpenCV
         lbl = cv2.imread(lbl_path, cv2.IMREAD_GRAYSCALE)
-        # encode using encode_segmap function: 0...18 and 250
+        # Encode labels
         lbl = self.encode_segmap(np.array(lbl, dtype=np.uint8))
 
         if self.is_transform:
@@ -146,14 +132,12 @@ class cityscapesLoader(data.Dataset):
         return img, lbl
 
     def transform(self, img, lbl):
-    # Image resize using OpenCV
-        img = cv2.resize(img, (self.img_size[1], self.img_size[0]), interpolation=cv2.INTER_LINEAR)  # Resize image
-
-        # No need to convert from BGR to RGB here because we did that in the __getitem__ method
-        img = img.astype(np.float64)  # Convert to float64 for further processing
+        # Resize image
+        img = cv2.resize(img, (self.img_size[1], self.img_size[0]), interpolation=cv2.INTER_LINEAR)
+        img = img.astype(np.float64)
         img = img.transpose(2, 0, 1)  # NHWC -> NCHW
 
-        # Resize label using OpenCV (use nearest neighbor for label resizing)
+        # Resize label
         lbl = cv2.resize(lbl, (self.img_size[1], self.img_size[0]), interpolation=cv2.INTER_NEAREST)
         lbl = lbl.astype(int)
 
@@ -186,69 +170,61 @@ class cityscapesLoader(data.Dataset):
         rgb[:, :, 2] = b / 255.0
         return rgb
 
-    # there are different class 0...33
-    # we are converting that info to 0....18; and 250 for void classes
-    # final mask has values 0...18 and 250
     def encode_segmap(self, mask):
-        # !! Comment in code had wrong informtion
-        # Put all void classes to ignore_index
+        # Encode segmentation map
         for _voidc in self.void_classes:
             mask[mask == _voidc] = self.ignore_index
         for _validc in self.valid_classes:
             mask[mask == _validc] = self.class_map[_validc]
         return mask
-train_data = cityscapesLoader(
-    root = path_data, 
-    split='train'
-    )
-val_data = cityscapesLoader(
-    root = path_data, 
-    split='val'
-    )
-train_loader = DataLoader(
-    train_data,
-    batch_size = batch_size,
-    shuffle=True,
-    num_workers = num_workers,
-)
-val_loader = DataLoader(
-    val_data,
-    batch_size = batch_size,
-    num_workers = num_workers,
-)
 
-# Function to visualize a single image and segmentation map
-def visualize_sample(image, label, loader):
-    # Move image and label to CPU (in case they are on GPU)
-    image = image.cpu().numpy()
-    label = label.cpu().numpy()
+    def save_image(self, img, save_path):
+        # Convert tensor to numpy array and transpose to HWC
+        img_np = img.numpy().transpose(1, 2, 0).astype(np.uint8)
+        # Convert from RGB to BGR
+        img_np = cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR)
+        # Save image
+        cv2.imwrite(save_path, img_np)
 
-    # Transpose image from (C, H, W) to (H, W, C) for displaying
-    image = image.transpose(1, 2, 0)
+    def save_label(self, lbl, save_path):
+        # Convert tensor to numpy array
+        lbl_np = lbl.numpy().astype(np.uint8)
+        # Save label as PNG
+        lbl_pil = Image.fromarray(lbl_np, mode='L')
+        lbl_pil.save(save_path)
 
-    # Plot image
-    plt.figure(figsize=(10, 5))
-    
-    plt.subplot(1, 2, 1)
-    plt.imshow(image.astype(np.uint8))  # convert to uint8 for display
-    plt.title("Input Image")
+    def prepare_data(self):
+        save_image_dir = os.path.join(os.getcwd(), "cityscapes_dataset", self.split, "images")
+        save_label_dir = os.path.join(os.getcwd(), "cityscapes_dataset", self.split, "masks")
+        os.makedirs(save_image_dir, exist_ok=True)
+        os.makedirs(save_label_dir, exist_ok=True)
 
-    # Decode segmentation map
-    decoded_label = loader.dataset.decode_segmap(label)
+        for idx in tqdm(range(len(self.files[self.split])), desc=f"Processing Cityscapes {self.split} data"):
+            img_path = self.files[self.split][idx].rstrip()
+            try:
+                img, lbl = self.__getitem__(idx)
 
-    # Plot the decoded segmentation map
-    plt.subplot(1, 2, 2)
-    plt.imshow(decoded_label)
-    plt.title("Segmentation Label")
-    plt.show()
+                # Save image
+                filename = os.path.basename(img_path)
+                image_save_path = os.path.join(save_image_dir, filename)
+                self.save_image(img, image_save_path)
 
-# Get a sample batch from the dataloader
-data_iter = iter(train_loader)
-images, labels = next(data_iter)
+                # Save label
+                label_filename = filename.replace('leftImg8bit.png', 'gtFine_labelIds.png')
+                label_save_path = os.path.join(save_label_dir, label_filename)
+                self.save_label(lbl, label_save_path)
+            except Exception as e:
+                logger.error(f"Error processing {img_path}: {e}")
 
-# Select the first image and label from the batch
-image = images[0]
-label = labels[0]
+        logger.info("Data preparation completed.")
 
-# Visualize the sample
-visualize_sample(image, label, train_loader)
+if __name__ == "__main__":
+    # Argument parsing
+    parser = argparse.ArgumentParser(description="Cityscapes Dataset Processing")
+    parser.add_argument("--dataset_path", type=str, default="/tmp/ahsan/sqfs/storage_local/datasets/public/cityscapes/", help="Path to the Cityscapes dataset root directory")
+    parser.add_argument("--split", type=str, choices=["train", "val", "test"], default="train", help="Dataset split to process")
+    args = parser.parse_args()
+
+    # Initialize and prepare the dataset
+    dataset = cityscapesLoader(root=args.dataset_path, split=args.split)
+    dataset.prepare_data()
