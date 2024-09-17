@@ -34,14 +34,22 @@ def build_sam_vit_l(checkpoint=None):
     )
 
 
-def build_sam_vit_b(checkpoint=None):
-    return _build_sam(
-        encoder_embed_dim=768,
-        encoder_depth=12,
-        encoder_num_heads=12,
-        encoder_global_attn_indexes=[2, 5, 8, 11],
-        checkpoint=checkpoint,
-    )
+def build_sam_vit_b(checkpoint:str):
+    if "sam_vit_b_01ec64.pth" in checkpoint:
+        return _build_sam(
+            encoder_embed_dim=768,
+            encoder_depth=12,
+            encoder_num_heads=12,
+            encoder_global_attn_indexes=[2, 5, 8, 11],
+            checkpoint=checkpoint,
+        )
+    else:
+        print("Loaded large model..")
+        return _build_sam( encoder_embed_dim=1280,
+            encoder_depth=12,
+            encoder_num_heads=12,
+            encoder_global_attn_indexes=[2, 5, 8, 11],
+            checkpoint=checkpoint,)
 
 
 sam_model_registry = {
