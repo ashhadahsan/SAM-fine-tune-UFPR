@@ -46,14 +46,18 @@ class DatasetSegmentation(Dataset):
                 else:
                     self.mask_files.append(os.path.join(config_file["DATASET"]["TRAIN_PATH"],'masks', os.path.basename(img_path)[:-4] + config_file["DATASET"]["IMAGE_FORMAT"]))
 
-
-
         else:
             self.img_files = glob.glob(os.path.join(config_file["DATASET"]["TEST_PATH"],'images',"*"+config_file["DATASET"]["IMAGE_FORMAT"]))
             self.mask_files = []
-            for img_path in self.img_files:
-                self.mask_files.append(os.path.join(config_file["DATASET"]["TEST_PATH"],'masks', os.path.basename(img_path)[:-4] + config_file["DATASET"]["IMAGE_FORMAT"]))
 
+            for img_path in self.img_files:
+                if dataset=="cityscapes":
+                    label_filename=os.path.join(config_file["DATASET"]["TEST_PATH"],'masks', os.path.basename(img_path)[:-4] + config_file["DATASET"]["IMAGE_FORMAT"])
+                    label_filename = label_filename.replace('leftImg8bit.png', 'gtFine_labelIds.png')
+                    self.mask_files.append(label_filename) 
+                else:
+                    self.mask_files.append(os.path.join(config_file["DATASET"]["TEST_PATH"],'masks', os.path.basename(img_path)[:-4] + config_file["DATASET"]["IMAGE_FORMAT"]))
+        print(f"Loaded {mode} for {dataset}")
         self.processor = processor
 
     def __len__(self):
