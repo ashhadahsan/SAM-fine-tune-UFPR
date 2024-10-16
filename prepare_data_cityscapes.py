@@ -9,7 +9,7 @@ from tqdm import tqdm
 from PIL import Image
 import logging
 import argparse
-
+from typing import Literal
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -218,13 +218,14 @@ class cityscapesLoader(data.Dataset):
 
         logger.info("Data preparation completed.")
 
-if __name__ == "__main__":
-    # Argument parsing
-    parser = argparse.ArgumentParser(description="Cityscapes Dataset Processing")
-    parser.add_argument("--dataset_path", type=str, default="/tmp/ahsan/sqfs/storage_local/datasets/public/cityscapes/", help="Path to the Cityscapes dataset root directory")
-    parser.add_argument("--split", type=str, choices=["train", "val", "test"], default="train", help="Dataset split to process")
-    args = parser.parse_args()
-
+# if __name__ == "__main__":
+#     # Argument parsing
+#     parser = argparse.ArgumentParser(description="Cityscapes Dataset Processing")
+#     parser.add_argument("--dataset_path", type=str, default="/tmp/ahsan/sqfs/storage_local/datasets/public/cityscapes/", help="Path to the Cityscapes dataset root directory")
+#     parser.add_argument("--split", type=str, choices=["train", "val", "test"], default="test", help="Dataset split to process")
+#     logging.info("Preparing CityScapes for Test")
+#     args = parser.parse_args()
+def main(dataset_path:str,split:Literal['train',"test"]):
     # Initialize and prepare the dataset
-    dataset = cityscapesLoader(root=args.dataset_path, split=args.split)
+    dataset = cityscapesLoader(root=dataset_path ,split=split)
     dataset.prepare_data()
