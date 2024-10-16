@@ -32,14 +32,14 @@ default_sam_config = {
 }
 
 # Select dataset (UFPR or Cityscapes)
-data = questionary.select(
+dataset_name = questionary.select(
     "Select your data?",
     default="UFPR",
     choices=["UFPR", "Cityscapes"]
 ).ask()
 
 # Ask for paths and preprocessing options
-if data == "UFPR":
+if dataset_name == "UFPR":
     data_root_path = questionary.path(
         default="/tmp/ahsan/sqfs/storage_local/datasets/public/ufpr-alpr",
         message=f"Please select your root data location for {data}",
@@ -99,7 +99,7 @@ training_parameters = questionary.form(
 ).ask()
 
 # Define paths depending on the dataset
-if data == "UFPR":
+if dataset_name == "UFPR":
     train_path = os.path.join(ufpr_preprocessed_path, "training")
     test_path = os.path.join(ufpr_preprocessed_path, "testing")
 else:
@@ -111,7 +111,8 @@ final_config = {
     'DATASET': {
         'TRAIN_PATH': train_path,
         'TEST_PATH': test_path,
-        'IMAGE_FORMAT': default_train_config['IMAGE_FORMAT']
+        'IMAGE_FORMAT': default_train_config['IMAGE_FORMAT'],
+        'TYPE':dataset_name
     },
     'SAM': {
         'CHECKPOINT': default_sam_config['CHECKPOINT'],
