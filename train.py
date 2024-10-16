@@ -46,7 +46,7 @@ def train_function(config_file_path):
     train_model = config_file["MODEL"]["TYPE"]
     checkpoint_path = config_file["SAM"]["CHECKPOINT"]
     train_dataset_path = config_file["DATASET"]["TRAIN_PATH"]
-    data = config_file["DATASET"]["TYPE"]
+    dataset_name = config_file["DATASET"]["TYPE"]
     rank = config_file["SAM"]["RANK"]
     num_epochs = config_file["TRAIN"]["NUM_EPOCHS"]
     batch_size = config_file["TRAIN"]["BATCH_SIZE"]
@@ -67,7 +67,7 @@ def train_function(config_file_path):
 
     # Process the dataset
     processor = Samprocessor(model)
-    train_ds = DatasetSegmentation(config_file, processor, mode="train", dataset=data)
+    train_ds = DatasetSegmentation(config_file, processor, mode="train", dataset=dataset_name)
 
     # Create a dataloader
     train_dataloader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
