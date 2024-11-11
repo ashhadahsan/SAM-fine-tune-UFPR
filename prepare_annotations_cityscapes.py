@@ -8,6 +8,8 @@ from PIL import Image
 import logging
 import argparse
 import cv2
+import yaml
+from typing import Literal
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -210,25 +212,25 @@ class cityscapesLoader(torch.utils.data.Dataset):
         logger.info(f"Completed processing {self.split} data.")
         return dataset_annotations
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Cityscapes Dataset Processing")
-    parser.add_argument("--dataset_path", type=str, required=False, help="Path to the dataset root directory", default="/tmp/ahsan/sqfs/storage_local/datasets/public/cityscapes/")
-    args = parser.parse_args()
+def prepare_annotations(dataset_path:str,split:Literal['train','test']):
+    
+    annotations_file_name="_".join("20241111_105827_config.yaml".split("_")[0:-1])+"_annotations.json"
 
-    annotations_path = 'annotations_cityscapes.json'
-    if os.path.exists(annotations_path):
-        with open(annotations_path, 'r') as f:
+
+
+    if os.path.exists(annotations_file_name):
+        with open(annotations_file_name, 'r') as f:
             annotations = json.load(f)
     else:
         annotations = {"train": {}, "val": {}}
 
     for split in ["train", "val"]:
         logging.info(f"Preparing annotations for {split}")
-        dataset = cityscapesLoader(root=args.dataset_path, split=split)
+        dataset = cityscapesLoader(root=dataset_path, split=split)
         data = dataset.prepare_data()
         annotations[split] = data
 
-    with open(annotations_path, 'w') as f:
+    with open(annotations_file_name, 'w') as f:
         json.dump(annotations, f, indent=4)
 
-    logger.info(f"Annotations saved to {annotations_path}")
+    logger.info(f"Annotations saved to {annotations_file_name}")
