@@ -17,7 +17,12 @@ from src.processor import Samprocessor
 from src.segment_anything import build_sam_vit_h, build_sam_vit_b
 from src.lora import LoRA_sam
 
-os.environ['CUDA_VISIBLE_DEVICES'] = '8'
+# Run shell script to select the best GPU
+subprocess.run("chmod +x select_best_gpu.sh", shell=True)
+subprocess.run("./select_best_gpu.sh", shell=True)
+
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+print(f"Using device: {torch.cuda.get_device_name(device)}")
 
 def download_model(url):
     response = requests.get(url)
@@ -44,7 +49,6 @@ def train_function(config_file_path):
     # Extract values from config
     train_model = config_file["MODEL"]["TYPE"]
     checkpoint_path = config_file["SAM"]["CHECKPOINT"]
-    train_dataset_path = config_file["DATASET"]["TRAIN_PATH"]
     dataset_name = config_file["DATASET"]["TYPE"]
     rank = config_file["SAM"]["RANK"]
     num_epochs = config_file["TRAIN"]["NUM_EPOCHS"]
@@ -53,14 +57,8 @@ def train_function(config_file_path):
     patience = config_file["TRAIN"]["PATIENCE"]
     resume_training = config_file["TRAIN"].get("RESUME_TRAINING", False)
     
-    # Checkpoint path
-    checkpoint_dir = os.path.join(os.getcwd(), "checkpoints")
-    os.makedirs(checkpoint_dir, exist_ok=True)
-    checkpoint_path = os.path.join(checkpoint_dir, "model_checkpoint.pth")
-
-    # Load SAM model
+    # Load SAM model checkpoint once (it remains the same)
     sam_checkpoint_path = get_model_checkpoint(train_model, checkpoint_path)
-
     if train_model == "vit-b":
         sam = build_sam_vit_b(checkpoint=sam_checkpoint_path)
     else:
@@ -69,55 +67,35 @@ def train_function(config_file_path):
     # Create SAM LoRA
     sam_lora = LoRA_sam(sam, rank)
     model = sam_lora.sam
+    model.to(device)
+
+    # Check if we should resume from saved LoRA parameters
+    lora_save_path = os.path.join(os.getcwd(), "lora_weights", f"sam_{train_model}_lora_rank_{rank}_data_{dataset_name}.safetensors")
+    if resume_training and os.path.exists(lora_save_path):
+        sam_lora.load_lora_parameters(lora_save_path)
+        print(f"Resumed training from saved LoRA parameters: {lora_save_path}")
+        start_epoch = config_file["TRAIN"].get("LAST_EPOCH", 0) + 1
+    else:
+        start_epoch = 0
 
     # Process the dataset
     processor = Samprocessor(model)
     train_ds = DatasetSegmentation(config_file, processor, mode="train", dataset=dataset_name)
-
-    # Create a dataloader
     train_dataloader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
 
-    # Initialize optimizer and Loss
+    # Initialize optimizer and loss function
     optimizer = Adam(model.image_encoder.parameters(), lr=learning_rate, weight_decay=0)
     seg_loss = monai.losses.DiceCELoss(sigmoid=True, squared_pred=True, reduction='mean')
-    subprocess.run("chmod +x select_best_gpu.sh", shell=True)  # Make sure the script is executable
-    subprocess.run("./select_best_gpu.sh", shell=True)
 
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    print(f"Using device: {torch.cuda.get_device_name(device)}")
-
-    # Set model to train and into the device
-    model.train()
-    model.to(device)
-
-    # Track loss for plotting
+    # Track training loss
     total_loss = []
-
-    # Initialize SummaryWriter
     writer = SummaryWriter()
-
-    # Early stopping parameters
     best_loss = float('inf')
     epochs_no_improve = 0
     early_stop = False
 
-    # Resume from checkpoint if resume_training is True and checkpoint exists
-    if resume_training and os.path.exists(checkpoint_path):
-        checkpoint = torch.load(checkpoint_path)
-        model.load_state_dict(checkpoint["model_state_dict"])
-        optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
-        start_epoch = checkpoint["epoch"] + 1
-        total_loss = checkpoint["total_loss"]
-        best_loss = checkpoint["best_loss"]
-        epochs_no_improve = checkpoint["epochs_no_improve"]
-        print(f"Resuming from epoch {start_epoch}")
-    else:
-        start_epoch = 0
-        total_loss = []
-
-    # Start the timer
+    # Start training
     start_time = time.time()
-
     for epoch in range(start_epoch, num_epochs):
         epoch_losses = []
         torch.cuda.empty_cache()
@@ -126,7 +104,7 @@ def train_function(config_file_path):
             outputs = model(batched_input=batch, multimask_output=False)
             stk_gt, stk_out = utils.stacking_batch(batch, outputs)
             stk_out = stk_out.squeeze(1)
-            stk_gt = stk_gt.unsqueeze(1)  # Ensure the correct dimension [B, C, H, W]
+            stk_gt = stk_gt.unsqueeze(1)
             loss = seg_loss(stk_out, stk_gt.float().to(device))
 
             optimizer.zero_grad()
@@ -136,29 +114,17 @@ def train_function(config_file_path):
 
         mean_loss = mean(epoch_losses)
         total_loss.append(mean_loss)
-        print(f'EPOCH: {epoch}')
-        print(f'Mean loss training: {mean_loss}')
-
-        # Log the mean loss for the epoch
         writer.add_scalar('Loss/train', mean_loss, epoch)
 
-        # Check if we need to update the best model
         if mean_loss < best_loss:
             best_loss = mean_loss
             epochs_no_improve = 0
-            # Optionally save the best model here
         else:
             epochs_no_improve += 1
 
-        # Save checkpoint after each epoch
-        torch.save({
-            "epoch": epoch,
-            "model_state_dict": model.state_dict(),
-            "optimizer_state_dict": optimizer.state_dict(),
-            "total_loss": total_loss,
-            "best_loss": best_loss,
-            "epochs_no_improve": epochs_no_improve
-        }, checkpoint_path)
+        # Save the LoRA parameters after each epoch
+        sam_lora.save_lora_parameters(lora_save_path)
+        print(f"Saved LoRA parameters to: {lora_save_path}")
 
         if epochs_no_improve == patience:
             print('Early stopping triggered.')
@@ -168,23 +134,17 @@ def train_function(config_file_path):
     if not early_stop:
         print('Training completed without early stopping.')
 
-    # End the timer
+    # Final processing
     end_time = time.time()
     total_training_time = end_time - start_time
-
-    # Save the LoRA parameters in safetensors format
-    lora_save_path=os.path.join(os.getcwd(),"lora_weights", f"sam_{train_model}_lora_rank_{rank}_data_{dataset_name}_{num_epochs}_epochs.safetensors")
-    sam_lora.save_lora_parameters(lora_save_path)
-
-    # Close the writer
     writer.close()
 
-    # Plot the epoch vs. loss graph
+    # Plot loss
     plt.figure(figsize=(10, 5))
     plt.plot(range(len(total_loss)), total_loss, marker='o')
     plt.title(f'Training Loss per Epoch\nTotal Training Time: {total_training_time:.2f} seconds\n Rank: {rank}')
     plt.xlabel('Epoch')
     plt.ylabel('Loss')
     plt.grid(True)
-    plt.show()
     plt.savefig(f"loss_epoch_plot_{dataset_name}_{train_model}.png")
+    plt.show()
