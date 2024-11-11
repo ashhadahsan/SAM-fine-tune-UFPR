@@ -6,7 +6,8 @@ from tqdm import tqdm
 import logging
 import argparse
 import json
-
+import yaml
+from typing import Literal
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -102,16 +103,14 @@ class UFPR_ALPR_Dataset:
         logger.info("Data preparation completed.")
         return dataset_annotations
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="UFPR ALPR Dataset Processing")
-    parser.add_argument("--dataset_path", type=str, required=False, help="Path to the dataset root directory", default="/tmp/ahsan/sqfs/storage_local/datasets/public/ufpr-alpr")
-    parser.add_argument("--split", type=str, choices=["training", "testing"], default="training", help="Dataset split to process")
+def prepare_annotations(dataset_path:str,split:Literal['training','testing']):
     
-    args = parser.parse_args()
+    annotations_file_name="_".join("20241111_105827_config.yaml".split("_")[0:-1])+"_annotations.json"
 
-    annotations_path = 'annotations.json'
-    if os.path.exists(annotations_path):
-        with open(annotations_path, 'r') as f:
+
+
+    if os.path.exists(annotations_file_name):
+        with open(annotations_file_name, 'r') as f:
             annotations = json.load(f)
     else:
         annotations = {"train": {}, "test": {}}
@@ -119,7 +118,7 @@ if __name__ == "__main__":
     for split in ["training", "testing"]:
         logging.info(f"Preparing annotations for {split}")
 
-        dataset = UFPR_ALPR_Dataset(root=args.dataset_path, split=split)
+        dataset = UFPR_ALPR_Dataset(root=dataset_path, split=split)
         data = dataset.prepare_data()
 
         if split == "training":
@@ -127,5 +126,5 @@ if __name__ == "__main__":
         else:
             annotations["test"] = data
 
-    with open(annotations_path, 'w') as f: 
+    with open(annotations_file_name, 'w') as f: 
         json.dump(annotations, f, indent=4)
