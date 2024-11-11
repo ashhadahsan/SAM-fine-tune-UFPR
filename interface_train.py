@@ -42,7 +42,7 @@ dataset_name = questionary.select(
 if dataset_name == "UFPR":
     data_root_path = questionary.path(
         default="/tmp/ahsan/sqfs/storage_local/datasets/public/ufpr-alpr",
-        message=f"Please select your root data location for {data}",
+        message=f"Please select your root data location for {dataset_name}",
         only_directories=True
     ).ask()
 
@@ -60,10 +60,10 @@ if dataset_name == "UFPR":
     else:
         logger.info("Using preprocessed UFPR data.")
 
-elif data == "Cityscapes":
+elif dataset_name == "Cityscapes":
     data_root_path = questionary.path(
         default="/tmp/ahsan/sqfs/storage_local/datasets/public/cityscapes",
-        message=f"Please select your root data location for {data}",
+        message=f"Please select your root data location for {dataset_name}",
         only_directories=True
     ).ask()
 
@@ -122,7 +122,11 @@ final_config = {
         'BATCH_SIZE': default_train_config['BATCH_SIZE'],
         'NUM_EPOCHS': int(training_parameters['epochs']),
         'LEARNING_RATE': default_train_config['LEARNING_RATE'],
-        'PATIENCE': default_train_config['PATIENCE']
+        'PATIENCE': default_train_config['PATIENCE'], 
+        "RESUME_TRAINING":True
+    },
+    "MODEL":{
+        "TYPE":"vit-h" if 'vit_h' in default_sam_config['CHECKPOINT'] else 'vit-b'
     }
 }
 
