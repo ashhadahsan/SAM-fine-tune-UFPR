@@ -1,166 +1,150 @@
-import questionary
-from prepare_data import main as preprocess_ufpr
-from prepare_data_cityscapes import main as preprocess_cityscapes
-import logging
-from datetime import datetime
-from train import train_function
-import os
+import torch
+import monai
+from tqdm import tqdm
+from statistics import mean
+from torch.utils.data import DataLoader
+from torch.optim import Adam
+import matplotlib.pyplot as plt
 import yaml
-from prepare_annotations import prepare_annotations as ufpr_annotations
-from prepare_annotations_cityscapes import prepare_annotations as cityscapes_annotations
+from torch.utils.tensorboard import SummaryWriter
+import time
+import os
+import requests
+import subprocess
+import src.utils as utils
+from src.dataloader import DatasetSegmentation, collate_fn
+from src.processor import Samprocessor
+from src.segment_anything import build_sam_vit_h, build_sam_vit_b
+from src.lora import LoRA_sam
 
-# Logger configuration
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# Run shell script to select the best GPU
+subprocess.run("chmod +x select_best_gpu.sh", shell=True)
+subprocess.run("./select_best_gpu.sh", shell=True)
 
-# Default paths
-ufpr_preprocessed_path = "/home/ahsan/sam_finetune/SAM-fine-tune/ufpr_dataset"
-cityscapes_preprocessed_path = "/home/ahsan/sam_finetune/SAM-fine-tune/cityscapes_dataset"
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+print(f"Using device: {torch.cuda.get_device_name(device)}")
 
-# Default configurations for training
-default_train_config = {
-    'TRAIN_PATH': './dataset/training',
-    'TEST_PATH': './dataset/testing',
-    'IMAGE_FORMAT': '.png',
-    'BATCH_SIZE': 1,
-    'NUM_EPOCHS': 15,
-    'LEARNING_RATE': 0.0001,
-    'PATIENCE': 10
-}
+def download_model(url):
+    response = requests.get(url)
+    model_name = url.split("/")[-1]
+    model_path = os.path.join(os.getcwd(), model_name)
+    with open(model_path, "wb") as f:
+        f.write(response.content)
+    return model_path
 
-default_sam_config = {
-    'CHECKPOINT': './sam_vit_h_4b8939.pth',
-    'RANK': "512"
-}
-
-# Check if user wants to resume training
-resume_training = questionary.confirm("Do you want to resume training?").ask()
-if resume_training:
-    config_path = questionary.path("Please provide the path to the existing config file:", only_files=True).ask()
-else:
-    # Select dataset (UFPR or Cityscapes)
-    dataset_name = questionary.select(
-        "Select your data?",
-        default="UFPR",
-        choices=["UFPR", "Cityscapes"]
-    ).ask()
-
-    # Ask for paths and preprocessing options
-    if dataset_name == "UFPR":
-        data_root_path = questionary.path(
-            default="/tmp/ahsan/sqfs/storage_local/datasets/public/ufpr-alpr",
-            message=f"Please select your root data location for {dataset_name}",
-            only_directories=True
-        ).ask()
-
-        preprocessed_check = questionary.select(
-            "Have you already preprocessed the data?",
-            choices=["Yes", "No"]
-        ).ask()
-
-        if preprocessed_check == "No":
-            logger.info("Starting UFPR data preprocessing...")
-            preprocess_ufpr(dataset_path=data_root_path, split="training")
-            logger.info("UFPR training data preprocessing completed.")
-            preprocess_ufpr(dataset_path=data_root_path, split="testing")
-            logger.info("UFPR testing data preprocessing completed.")
+def get_model_checkpoint(train_model, checkpoint_path):
+    if not os.path.exists(checkpoint_path):
+        if train_model == "vit-b":
+            url = "https://huggingface.co/datasets/Gourieff/ReActor/resolve/main/models/sams/sam_vit_b_01ec64.pth"
         else:
-            logger.info("Using preprocessed UFPR data.")
-        annotations_needed = questionary.select("Do you want to prepare annotations?", choices=["Yes", "No"]).ask()
-        if annotations_needed == "Yes":
-            logger.info("Starting UFPR data annotations...")
-            ufpr_annotations(dataset_path=data_root_path, split="training")
-            logger.info("UFPR training data annotations completed.")
-            ufpr_annotations(dataset_path=data_root_path, split="testing")
-            logger.info("UFPR testing data preprocessing completed.")
+            url = "https://huggingface.co/spaces/abhishek/StableSAM/resolve/main/sam_vit_h_4b8939.pth"
+        return download_model(url=url)
+    return checkpoint_path
 
-    elif dataset_name == "Cityscapes":
-        data_root_path = questionary.path(
-            default="/tmp/ahsan/sqfs/storage_local/datasets/public/cityscapes",
-            message=f"Please select your root data location for {dataset_name}",
-            only_directories=True
-        ).ask()
+def train_function(config_file_path):
+    # Load the config file
+    with open(config_file_path, "r") as ymlfile:
+        config_file = yaml.load(ymlfile, Loader=yaml.Loader)
 
-        preprocessed_check = questionary.select(
-            "Have you already preprocessed the data?",
-            choices=["Yes", "No"]
-        ).ask()
-
-        if preprocessed_check == "No":
-            logger.info("Starting Cityscapes data preprocessing...")
-            preprocess_cityscapes(dataset_path=data_root_path, split="train")
-            logger.info("Cityscapes training data preprocessing completed.")
-            preprocess_cityscapes(dataset_path=data_root_path, split="test")
-            logger.info("Cityscapes testing data preprocessing completed.")
-        else:
-            logger.info("Using preprocessed Cityscapes data.")
-        annotations_needed = questionary.select("Do you want to prepare annotations?", choices=["Yes", "No"]).ask()
-        if annotations_needed == "Yes":
-            logger.info("Starting Cityscapes data annotations...")
-            cityscapes_annotations(dataset_path=data_root_path, split="train")
-            logger.info("Cityscapes training data annotations completed.")
-            cityscapes_annotations(dataset_path=data_root_path, split="test")
-            logger.info("Cityscapes testing data preprocessing completed.")
-
-    # Gather training parameters from the user
-    training_parameters = questionary.form(
-        rank=questionary.select(
-            "Select the rank (default 512):",
-            choices=["2", "4", "6", "8", "16", "32", "64", "128", "256", "512"],
-            default=default_sam_config['RANK']
-        ),
-        epochs=questionary.text(
-            "Enter desired number of epochs (recommended 10-20):",
-            default=str(default_train_config['NUM_EPOCHS'])
-        ),
-        model_type=questionary.select(
-            "Select Model Type:",
-            choices=['SAM-Base', 'SAM-Huge']
-        )
-    ).ask()
-
-    # Define paths depending on the dataset
-    if dataset_name == "UFPR":
-        train_path = os.path.join(ufpr_preprocessed_path, "training")
-        test_path = os.path.join(ufpr_preprocessed_path, "testing")
+    # Extract values from config
+    train_model = config_file["MODEL"]["TYPE"]
+    checkpoint_path = config_file["SAM"]["CHECKPOINT"]
+    dataset_name = config_file["DATASET"]["TYPE"]
+    rank = config_file["SAM"]["RANK"]
+    num_epochs = config_file["TRAIN"]["NUM_EPOCHS"]
+    batch_size = config_file["TRAIN"]["BATCH_SIZE"]
+    learning_rate = config_file["TRAIN"]["LEARNING_RATE"]
+    patience = config_file["TRAIN"]["PATIENCE"]
+    resume_training = config_file["TRAIN"].get("RESUME_TRAINING", False)
+    
+    # Load SAM model checkpoint once (it remains the same)
+    sam_checkpoint_path = get_model_checkpoint(train_model, checkpoint_path)
+    if train_model == "vit-b":
+        sam = build_sam_vit_b(checkpoint=sam_checkpoint_path)
     else:
-        train_path = os.path.join(cityscapes_preprocessed_path, "training")
-        test_path = os.path.join(cityscapes_preprocessed_path, "testing")
+        sam = build_sam_vit_h(checkpoint=sam_checkpoint_path)
 
-    # Final configuration file with user inputs and default values
-    final_config = {
-        'DATASET': {
-            'TRAIN_PATH': train_path,
-            'TEST_PATH': test_path,
-            'IMAGE_FORMAT': default_train_config['IMAGE_FORMAT'],
-            'TYPE': dataset_name
-        },
-        'SAM': {
-            'CHECKPOINT': default_sam_config['CHECKPOINT'],
-            'RANK': int(training_parameters['rank'])
-        },
-        'TRAIN': {
-            'BATCH_SIZE': default_train_config['BATCH_SIZE'],
-            'NUM_EPOCHS': int(training_parameters['epochs']),
-            'LEARNING_RATE': default_train_config['LEARNING_RATE'],
-            'PATIENCE': default_train_config['PATIENCE'],
-            "RESUME_TRAINING": resume_training
-        },
-        "MODEL": {
-            "TYPE": "vit-h" if 'vit_h' in default_sam_config['CHECKPOINT'] else 'vit-b'
-        }
-    }
+    # Create SAM LoRA
+    sam_lora = LoRA_sam(sam, rank)
+    model = sam_lora.sam
+    model.to(device)
 
-    # Save the configuration file with a timestamp
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    config_filename = f"{timestamp}_config.yaml"
-    config_path = os.path.join(os.getcwd(), config_filename)
+    # Check if we should resume from saved LoRA parameters
+    lora_save_path = os.path.join(os.getcwd(), "lora_weights", f"sam_{train_model}_lora_rank_{rank}_data_{dataset_name}.safetensors")
+    if resume_training and os.path.exists(lora_save_path):
+        sam_lora.load_lora_parameters(lora_save_path)
+        print(f"Resumed training from saved LoRA parameters: {lora_save_path}")
+        start_epoch = config_file["TRAIN"].get("LAST_EPOCH", 0) + 1
+    else:
+        start_epoch = 0
 
-    with open(config_path, 'w') as config_file:
-        yaml.dump(final_config, config_file)
+    # Process the dataset
+    processor = Samprocessor(model)
+    train_ds = DatasetSegmentation(config_file, processor, mode="train", dataset=dataset_name)
+    train_dataloader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
 
-    logger.info(f"Config file saved as {config_filename}")
+    # Initialize optimizer and loss function
+    optimizer = Adam(model.image_encoder.parameters(), lr=learning_rate, weight_decay=0)
+    seg_loss = monai.losses.DiceCELoss(sigmoid=True, squared_pred=True, reduction='mean')
 
-# Start the training process with the config file
-train_function(config_path)
-logger.info("Training Started")
+    # Track training loss
+    total_loss = []
+    writer = SummaryWriter()
+    best_loss = float('inf')
+    epochs_no_improve = 0
+    early_stop = False
+
+    # Start training
+    start_time = time.time()
+    for epoch in range(start_epoch, num_epochs):
+        epoch_losses = []
+        torch.cuda.empty_cache()
+
+        for i, batch in enumerate(tqdm(train_dataloader)):
+            outputs = model(batched_input=batch, multimask_output=False)
+            stk_gt, stk_out = utils.stacking_batch(batch, outputs)
+            stk_out = stk_out.squeeze(1)
+            stk_gt = stk_gt.unsqueeze(1)
+            loss = seg_loss(stk_out, stk_gt.float().to(device))
+
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            epoch_losses.append(loss.item())
+
+        mean_loss = mean(epoch_losses)
+        total_loss.append(mean_loss)
+        writer.add_scalar('Loss/train', mean_loss, epoch)
+
+        if mean_loss < best_loss:
+            best_loss = mean_loss
+            epochs_no_improve = 0
+        else:
+            epochs_no_improve += 1
+
+        # Save the LoRA parameters after each epoch
+        sam_lora.save_lora_parameters(lora_save_path)
+        print(f"Saved LoRA parameters to: {lora_save_path}")
+
+        if epochs_no_improve == patience:
+            print('Early stopping triggered.')
+            early_stop = True
+            break
+
+    if not early_stop:
+        print('Training completed without early stopping.')
+
+    # Final processing
+    end_time = time.time()
+    total_training_time = end_time - start_time
+    writer.close()
+
+    # Plot loss
+    plt.figure(figsize=(10, 5))
+    plt.plot(range(len(total_loss)), total_loss, marker='o')
+    plt.title(f'Training Loss per Epoch\nTotal Training Time: {total_training_time:.2f} seconds\n Rank: {rank}')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.grid(True)
+    plt.savefig(f"loss_epoch_plot_{dataset_name}_{train_model}.png")
+    plt.show()
