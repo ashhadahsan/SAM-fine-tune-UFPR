@@ -6,5 +6,4 @@ echo "Selected GPU: $BEST_GPU"
 # Set the selected GPU to CUDA_VISIBLE_DEVICES
 export CUDA_VISIBLE_DEVICES=$BEST_GPU
 
-# Run your Python script
-python train.py
+
