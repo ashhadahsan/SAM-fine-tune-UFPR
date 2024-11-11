@@ -8,17 +8,16 @@ import matplotlib.pyplot as plt
 import yaml
 from torch.utils.tensorboard import SummaryWriter
 import time
-
+import os
+import requests
+import subprocess
 import src.utils as utils
 from src.dataloader import DatasetSegmentation, collate_fn
 from src.processor import Samprocessor
 from src.segment_anything import build_sam_vit_h, build_sam_vit_b
 from src.lora import LoRA_sam
-import os
-from typing import Literal
-import requests
 
-os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+os.environ['CUDA_VISIBLE_DEVICES'] = '8'
 
 def download_model(url):
     response = requests.get(url)
@@ -52,6 +51,12 @@ def train_function(config_file_path):
     batch_size = config_file["TRAIN"]["BATCH_SIZE"]
     learning_rate = config_file["TRAIN"]["LEARNING_RATE"]
     patience = config_file["TRAIN"]["PATIENCE"]
+    resume_training = config_file["TRAIN"].get("RESUME_TRAINING", False)
+    
+    # Checkpoint path
+    checkpoint_dir = os.path.join(os.getcwd(), "checkpoints")
+    os.makedirs(checkpoint_dir, exist_ok=True)
+    checkpoint_path = os.path.join(checkpoint_dir, "model_checkpoint.pth")
 
     # Load SAM model
     sam_checkpoint_path = get_model_checkpoint(train_model, checkpoint_path)
@@ -75,6 +80,8 @@ def train_function(config_file_path):
     # Initialize optimizer and Loss
     optimizer = Adam(model.image_encoder.parameters(), lr=learning_rate, weight_decay=0)
     seg_loss = monai.losses.DiceCELoss(sigmoid=True, squared_pred=True, reduction='mean')
+    subprocess.run("chmod +x select_best_gpu.sh", shell=True)  # Make sure the script is executable
+    subprocess.run("./select_best_gpu.sh", shell=True)
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {torch.cuda.get_device_name(device)}")
@@ -94,10 +101,24 @@ def train_function(config_file_path):
     epochs_no_improve = 0
     early_stop = False
 
+    # Resume from checkpoint if resume_training is True and checkpoint exists
+    if resume_training and os.path.exists(checkpoint_path):
+        checkpoint = torch.load(checkpoint_path)
+        model.load_state_dict(checkpoint["model_state_dict"])
+        optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+        start_epoch = checkpoint["epoch"] + 1
+        total_loss = checkpoint["total_loss"]
+        best_loss = checkpoint["best_loss"]
+        epochs_no_improve = checkpoint["epochs_no_improve"]
+        print(f"Resuming from epoch {start_epoch}")
+    else:
+        start_epoch = 0
+        total_loss = []
+
     # Start the timer
     start_time = time.time()
 
-    for epoch in range(num_epochs):
+    for epoch in range(start_epoch, num_epochs):
         epoch_losses = []
         torch.cuda.empty_cache()
 
@@ -129,6 +150,16 @@ def train_function(config_file_path):
         else:
             epochs_no_improve += 1
 
+        # Save checkpoint after each epoch
+        torch.save({
+            "epoch": epoch,
+            "model_state_dict": model.state_dict(),
+            "optimizer_state_dict": optimizer.state_dict(),
+            "total_loss": total_loss,
+            "best_loss": best_loss,
+            "epochs_no_improve": epochs_no_improve
+        }, checkpoint_path)
+
         if epochs_no_improve == patience:
             print('Early stopping triggered.')
             early_stop = True
@@ -142,8 +173,7 @@ def train_function(config_file_path):
     total_training_time = end_time - start_time
 
     # Save the LoRA parameters in safetensors format
-   
-    lora_save_path=os.path.join(os.getcwd(),"lora_weights", f"sam_{train_model}_lora_rank_{rank}_data_{data}_{num_epochs}_epochs.safetensors")
+    lora_save_path=os.path.join(os.getcwd(),"lora_weights", f"sam_{train_model}_lora_rank_{rank}_data_{dataset_name}_{num_epochs}_epochs.safetensors")
     sam_lora.save_lora_parameters(lora_save_path)
 
     # Close the writer
@@ -157,5 +187,4 @@ def train_function(config_file_path):
     plt.ylabel('Loss')
     plt.grid(True)
     plt.show()
-    plt.savefig(f"loss_epoch_plot_{data}_{train_model}.png")
-
+    plt.savefig(f"loss_epoch_plot_{dataset_name}_{train_model}.png")
