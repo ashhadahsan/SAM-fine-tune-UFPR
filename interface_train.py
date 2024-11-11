@@ -33,134 +33,134 @@ default_sam_config = {
     'RANK': "512"
 }
 
-# Select dataset (UFPR or Cityscapes)
-dataset_name = questionary.select(
-    "Select your data?",
-    default="UFPR",
-    choices=["UFPR", "Cityscapes"]
-).ask()
-
-# Ask for paths and preprocessing options
-if dataset_name == "UFPR":
-    data_root_path = questionary.path(
-        default="/tmp/ahsan/sqfs/storage_local/datasets/public/ufpr-alpr",
-        message=f"Please select your root data location for {dataset_name}",
-        only_directories=True
-    ).ask()
-
-    preprocessed_check = questionary.select(
-        "Have you already preprocessed the data?",
-        choices=["Yes", "No"]
-    ).ask()
-
-    if preprocessed_check == "No":
-        logger.info("Starting UFPR data preprocessing...")
-        preprocess_ufpr(dataset_path=data_root_path, split="training")
-        logger.info("UFPR training data preprocessing completed.")
-        preprocess_ufpr(dataset_path=data_root_path, split="testing")
-        logger.info("UFPR testing data preprocessing completed.")
-    else:
-        logger.info("Using preprocessed UFPR data.")
-    annotations_needed=questionary.select("Do you want to prepare annotations?",
-                                          choices=["Yes", "No"]).ask()
-    if annotations_needed=="Yes":
-        logger.info("Starting UFPR data annotations...")
-        ufpr_annotations(dataset_path=data_root_path, split="training")
-        logger.info("UFPR training data annotations completed.")
-        ufpr_annotations(dataset_path=data_root_path, split="testing")
-        logger.info("UFPR testing data preprocessing completed.")
-
-    
-
-elif dataset_name == "Cityscapes":
-    data_root_path = questionary.path(
-        default="/tmp/ahsan/sqfs/storage_local/datasets/public/cityscapes",
-        message=f"Please select your root data location for {dataset_name}",
-        only_directories=True
-    ).ask()
-
-    preprocessed_check = questionary.select(
-        "Have you already preprocessed the data?",
-        choices=["Yes", "No"]
-    ).ask()
-
-    if preprocessed_check == "No":
-        logger.info("Starting Cityscapes data preprocessing...")
-        preprocess_cityscapes(dataset_path=data_root_path, split="train")
-        logger.info("Cityscapes training data preprocessing completed.")
-        preprocess_cityscapes(dataset_path=data_root_path, split="test")
-        logger.info("Cityscapes testing data preprocessing completed.")
-    else:
-        logger.info("Using preprocessed Cityscapes data.")
-    annotations_needed=questionary.select("Do you want to prepare annotations?",
-                                          choices=["Yes", "No"]).ask()
-    if annotations_needed=="Yes":
-        logger.info("Starting Cityscapes data annotations...")
-        cityscapes_annotations(dataset_path=data_root_path, split="train")
-        logger.info("Cityscapes training data annotations completed.")
-        cityscapes_annotations(dataset_path=data_root_path, split="test")
-        logger.info("Cityscapes testing data preprocessing completed.")
-
-# Gather training parameters from the user
-training_parameters = questionary.form(
-    rank=questionary.select(
-        "Select the rank (default 512):",
-        choices=["2", "4", "6", "8", "16", "32", "64", "128", "256", "512"],
-        default=default_sam_config['RANK']
-    ),
-    epochs=questionary.text(
-        "Enter desired number of epochs (recommended 10-20):",
-        default=str(default_train_config['NUM_EPOCHS'])
-    ),
-    model_type=questionary.select(
-        "Select Model Type:",
-        choices=['SAM-Base', 'SAM-Huge']
-    )
-).ask()
-
-# Define paths depending on the dataset
-if dataset_name == "UFPR":
-    train_path = os.path.join(ufpr_preprocessed_path, "training")
-    test_path = os.path.join(ufpr_preprocessed_path, "testing")
+# Check if user wants to resume training
+resume_training = questionary.confirm("Do you want to resume training?").ask()
+if resume_training:
+    config_path = questionary.path("Please provide the path to the existing config file:", only_files=True).ask()
 else:
-    train_path = os.path.join(cityscapes_preprocessed_path, "training")
-    test_path = os.path.join(cityscapes_preprocessed_path, "testing")
+    # Select dataset (UFPR or Cityscapes)
+    dataset_name = questionary.select(
+        "Select your data?",
+        default="UFPR",
+        choices=["UFPR", "Cityscapes"]
+    ).ask()
 
-# Final configuration file with user inputs and default values
-final_config = {
-    'DATASET': {
-        'TRAIN_PATH': train_path,
-        'TEST_PATH': test_path,
-        'IMAGE_FORMAT': default_train_config['IMAGE_FORMAT'],
-        'TYPE':dataset_name
-    },
-    'SAM': {
-        'CHECKPOINT': default_sam_config['CHECKPOINT'],
-        'RANK': int(training_parameters['rank'])
-    },
-    'TRAIN': {
-        'BATCH_SIZE': default_train_config['BATCH_SIZE'],
-        'NUM_EPOCHS': int(training_parameters['epochs']),
-        'LEARNING_RATE': default_train_config['LEARNING_RATE'],
-        'PATIENCE': default_train_config['PATIENCE'], 
-        "RESUME_TRAINING":True
-    },
-    "MODEL":{
-        "TYPE":"vit-h" if 'vit_h' in default_sam_config['CHECKPOINT'] else 'vit-b'
+    # Ask for paths and preprocessing options
+    if dataset_name == "UFPR":
+        data_root_path = questionary.path(
+            default="/tmp/ahsan/sqfs/storage_local/datasets/public/ufpr-alpr",
+            message=f"Please select your root data location for {dataset_name}",
+            only_directories=True
+        ).ask()
+
+        preprocessed_check = questionary.select(
+            "Have you already preprocessed the data?",
+            choices=["Yes", "No"]
+        ).ask()
+
+        if preprocessed_check == "No":
+            logger.info("Starting UFPR data preprocessing...")
+            preprocess_ufpr(dataset_path=data_root_path, split="training")
+            logger.info("UFPR training data preprocessing completed.")
+            preprocess_ufpr(dataset_path=data_root_path, split="testing")
+            logger.info("UFPR testing data preprocessing completed.")
+        else:
+            logger.info("Using preprocessed UFPR data.")
+        annotations_needed = questionary.select("Do you want to prepare annotations?", choices=["Yes", "No"]).ask()
+        if annotations_needed == "Yes":
+            logger.info("Starting UFPR data annotations...")
+            ufpr_annotations(dataset_path=data_root_path, split="training")
+            logger.info("UFPR training data annotations completed.")
+            ufpr_annotations(dataset_path=data_root_path, split="testing")
+            logger.info("UFPR testing data preprocessing completed.")
+
+    elif dataset_name == "Cityscapes":
+        data_root_path = questionary.path(
+            default="/tmp/ahsan/sqfs/storage_local/datasets/public/cityscapes",
+            message=f"Please select your root data location for {dataset_name}",
+            only_directories=True
+        ).ask()
+
+        preprocessed_check = questionary.select(
+            "Have you already preprocessed the data?",
+            choices=["Yes", "No"]
+        ).ask()
+
+        if preprocessed_check == "No":
+            logger.info("Starting Cityscapes data preprocessing...")
+            preprocess_cityscapes(dataset_path=data_root_path, split="train")
+            logger.info("Cityscapes training data preprocessing completed.")
+            preprocess_cityscapes(dataset_path=data_root_path, split="test")
+            logger.info("Cityscapes testing data preprocessing completed.")
+        else:
+            logger.info("Using preprocessed Cityscapes data.")
+        annotations_needed = questionary.select("Do you want to prepare annotations?", choices=["Yes", "No"]).ask()
+        if annotations_needed == "Yes":
+            logger.info("Starting Cityscapes data annotations...")
+            cityscapes_annotations(dataset_path=data_root_path, split="train")
+            logger.info("Cityscapes training data annotations completed.")
+            cityscapes_annotations(dataset_path=data_root_path, split="test")
+            logger.info("Cityscapes testing data preprocessing completed.")
+
+    # Gather training parameters from the user
+    training_parameters = questionary.form(
+        rank=questionary.select(
+            "Select the rank (default 512):",
+            choices=["2", "4", "6", "8", "16", "32", "64", "128", "256", "512"],
+            default=default_sam_config['RANK']
+        ),
+        epochs=questionary.text(
+            "Enter desired number of epochs (recommended 10-20):",
+            default=str(default_train_config['NUM_EPOCHS'])
+        ),
+        model_type=questionary.select(
+            "Select Model Type:",
+            choices=['SAM-Base', 'SAM-Huge']
+        )
+    ).ask()
+
+    # Define paths depending on the dataset
+    if dataset_name == "UFPR":
+        train_path = os.path.join(ufpr_preprocessed_path, "training")
+        test_path = os.path.join(ufpr_preprocessed_path, "testing")
+    else:
+        train_path = os.path.join(cityscapes_preprocessed_path, "training")
+        test_path = os.path.join(cityscapes_preprocessed_path, "testing")
+
+    # Final configuration file with user inputs and default values
+    final_config = {
+        'DATASET': {
+            'TRAIN_PATH': train_path,
+            'TEST_PATH': test_path,
+            'IMAGE_FORMAT': default_train_config['IMAGE_FORMAT'],
+            'TYPE': dataset_name
+        },
+        'SAM': {
+            'CHECKPOINT': default_sam_config['CHECKPOINT'],
+            'RANK': int(training_parameters['rank'])
+        },
+        'TRAIN': {
+            'BATCH_SIZE': default_train_config['BATCH_SIZE'],
+            'NUM_EPOCHS': int(training_parameters['epochs']),
+            'LEARNING_RATE': default_train_config['LEARNING_RATE'],
+            'PATIENCE': default_train_config['PATIENCE'],
+            "RESUME_TRAINING": resume_training
+        },
+        "MODEL": {
+            "TYPE": "vit-h" if 'vit_h' in default_sam_config['CHECKPOINT'] else 'vit-b'
+        }
     }
-}
 
-# Save the configuration file with a timestamp
-timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-config_filename = f"{timestamp}_config.yaml"
-config_path = os.path.join(os.getcwd(), config_filename)
+    # Save the configuration file with a timestamp
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    config_filename = f"{timestamp}_config.yaml"
+    config_path = os.path.join(os.getcwd(), config_filename)
 
-with open(config_path, 'w') as config_file:
-    yaml.dump(final_config, config_file)
+    with open(config_path, 'w') as config_file:
+        yaml.dump(final_config, config_file)
 
-logger.info(f"Config file saved as {config_filename}")
+    logger.info(f"Config file saved as {config_filename}")
 
-# Start the training process with the generated config file
+# Start the training process with the config file
 train_function(config_path)
-
 logger.info("Training Started")
