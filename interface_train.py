@@ -6,6 +6,8 @@ from datetime import datetime
 from train import train_function
 import os
 import yaml
+from prepare_annotations import prepare_annotations as ufpr_annotations
+from prepare_annotations_cityscapes import prepare_annotations as cityscapes_annotations
 
 # Logger configuration
 logging.basicConfig(level=logging.INFO)
@@ -59,6 +61,16 @@ if dataset_name == "UFPR":
         logger.info("UFPR testing data preprocessing completed.")
     else:
         logger.info("Using preprocessed UFPR data.")
+    annotations_needed=questionary.select("Do you want to prepare annotations?",
+                                          choices=["Yes", "No"]).ask()
+    if annotations_needed=="Yes":
+        logger.info("Starting UFPR data annotations...")
+        ufpr_annotations(dataset_path=data_root_path, split="training")
+        logger.info("UFPR training data annotations completed.")
+        ufpr_annotations(dataset_path=data_root_path, split="testing")
+        logger.info("UFPR testing data preprocessing completed.")
+
+    
 
 elif dataset_name == "Cityscapes":
     data_root_path = questionary.path(
@@ -80,6 +92,14 @@ elif dataset_name == "Cityscapes":
         logger.info("Cityscapes testing data preprocessing completed.")
     else:
         logger.info("Using preprocessed Cityscapes data.")
+    annotations_needed=questionary.select("Do you want to prepare annotations?",
+                                          choices=["Yes", "No"]).ask()
+    if annotations_needed=="Yes":
+        logger.info("Starting Cityscapes data annotations...")
+        cityscapes_annotations(dataset_path=data_root_path, split="train")
+        logger.info("Cityscapes training data annotations completed.")
+        cityscapes_annotations(dataset_path=data_root_path, split="test")
+        logger.info("Cityscapes testing data preprocessing completed.")
 
 # Gather training parameters from the user
 training_parameters = questionary.form(
